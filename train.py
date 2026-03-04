@@ -1,16 +1,16 @@
+import os
+import sys
 import torch
 import torch.nn.functional as F
+import wandb
+from dotenv import load_dotenv
 from torch.optim import Adam
 from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-import wandb
 from tqdm import tqdm
-from dotenv import load_dotenv
-import os
 
+from datasets.celeba import get_celeba_dataloader
 from model.identity_encoder import IdentityEncoder
 from model.message_encoder import MessageEncoder
-from model.utils import get_face_embedding
 
 load_dotenv()
 wandb.login(key=os.getenv("WANDB_API_KEY"))
@@ -20,42 +20,25 @@ def get_train_dataloader() -> DataLoader:
     """
     Returns a DataLoader over a face dataset.
 
-    For now this uses CelebA from torchvision with all parameters hardcoded.
+    Uses a custom CelebA implementation that works with a manually
+    downloaded dataset placed under ``data/celeba``.
     """
-    image_size = 128
-    batch_size = 32
-
-    transform = transforms.Compose(
-        [
-            transforms.Resize(image_size),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-        ]
-    )
-
-    dataset = datasets.CelebA(
+    return get_celeba_dataloader(
         root="./data/celeba",
         split="train",
-        target_type="identity",
-        transform=transform,
-        download=True,
-    )
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=True,
+        image_size=128,
+        batch_size=32,
         num_workers=4,
-        pin_memory=True,
+        shuffle=True,
+        return_repr=True,
     )
-
-    return dataloader
 
 
 def train() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run = wandb.init(
-        project="smoke22catches-vinnytsia-national-technical-university/face-swap-defense",
+        entity="smoke22catches-vinnytsia-national-technical-university",
+        project="face-swap-defense",
         name="identity-message-encoder-dev-1",
         config={
             "learning_rate": 1e-4,
@@ -85,10 +68,9 @@ def train() -> None:
         running_loss = 0.0
         num_batches = 0
 
-        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", file=sys.stdout)
 
-        for images, _ in progress_bar:
-            images = images.to(device)
+        for images, id_vecs, _ in progress_bar:
             batch_size = images.size(0)
 
             # Random binary messages in {0, 1}
@@ -96,11 +78,7 @@ def train() -> None:
                 0, 2, (batch_size, message_dim), device=device, dtype=torch.float32
             )
 
-            # Identity embeddings from pre-trained face model
-            with torch.no_grad():
-                id_vecs = get_face_embedding(images)  # (B, D)
-
-            # Use all 512 dimensions as the identity representation
+            # Use precomputed 512-d identity representations
             id_vecs = id_vecs.to(device)  # (B, 512)
 
             # Encode messages to 512-d vectors
@@ -120,8 +98,10 @@ def train() -> None:
             running_loss += loss.item()
             num_batches += 1
 
+            progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
+
         avg_loss = running_loss / max(1, num_batches)
-        progress_bar.set_postfix({"loss": f"{avg_loss:.4f}"})
+        print(f"Epoch {epoch + 1}/{num_epochs} - Loss: {avg_loss:.4f}")
         run.log({"loss": avg_loss})
 
     run.finish()

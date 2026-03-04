@@ -10,7 +10,8 @@ dependencies:
     - --extra-index-url https://download.pytorch.org/whl/cu124
     - torch
     - torchvision
+    - dotenv
+    - gdown
   - insightface
   - wandb
-  - dotenv
   - tqdm
