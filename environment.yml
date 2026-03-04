@@ -1,0 +1,16 @@
+name: face-swap-defense
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=>3.10
+  - numpy
+  - pip
+  - pip:
+    - --extra-index-url https://download.pytorch.org/whl/cu124
+    - torch
+    - torchvision
+  - insightface
+  - wandb
+  - dotenv
+  - tqdm
