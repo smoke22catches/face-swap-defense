@@ -1,6 +1,24 @@
-# Backbones and baseline models
+## Project setup
+1. Create a virtual environment with the following command:
+```bash
+conda env create -f environment.yml
+```
+or for CPU-only environment:
+```bash
+conda env create -f environment_cpu.yml
+```
+2. Activate the virtual environment with the following command:
+```bash
+conda activate face-swap-defense
+```
+3. Add kernel:
+```bash
+python -m ipykernel install --user --name face-swap-defense --display-name "Face Swap defense (face-swap-defense)"
+```
 
-## SimSwap
+## Backbones and baseline models
+
+### SimSwap
 1. Create a dedicated conda environment
 ```bash
 conda create -n simswap python=3.8

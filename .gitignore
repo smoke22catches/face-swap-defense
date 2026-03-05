@@ -3,3 +3,5 @@ data/
 **/*.zip
 **/__pycache__/
 wandb/
+**/*.jpg
+.ipynb_checkpoints/

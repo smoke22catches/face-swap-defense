@@ -96,6 +96,36 @@ class CelebADataset(Dataset):
             # Use None to indicate that we only have dummy labels.
             self.identity_labels = None
 
+        # If representations are requested, restrict the dataset to only those
+        # images that already have a corresponding representation file in
+        # ``repr_align_celeba``. This allows the dataset to be used while
+        # precomputation is still running.
+        if self.return_repr:
+            if not os.path.isdir(self.repr_root):
+                # No representation directory yet → dataset becomes effectively
+                # empty until representations are available.
+                self.image_paths = []
+                if self.identity_labels is not None:
+                    self.identity_labels = []
+            else:
+                filtered_paths: List[str] = []
+                filtered_labels: Optional[List[int]] = (
+                    [] if self.identity_labels is not None else None
+                )
+
+                for idx, path in enumerate(self.image_paths):
+                    filename = os.path.basename(path)
+                    stem, _ = os.path.splitext(filename)
+                    repr_path = os.path.join(self.repr_root, stem + ".pt")
+                    if os.path.exists(repr_path):
+                        filtered_paths.append(path)
+                        if filtered_labels is not None:
+                            filtered_labels.append(self.identity_labels[idx])
+
+                self.image_paths = filtered_paths
+                if filtered_labels is not None:
+                    self.identity_labels = filtered_labels
+
     def _discover_images(self, root: str) -> List[str]:
         image_paths: List[str] = []
         for dirpath, _, filenames in os.walk(root):
