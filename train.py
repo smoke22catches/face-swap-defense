@@ -11,6 +11,8 @@ from tqdm import tqdm
 from datasets.celeba import get_celeba_dataloader
 from model.identity_encoder import IdentityEncoder
 from model.message_encoder import MessageEncoder
+from model.watermark_encoder import WatermarkEncoder
+
 
 load_dotenv()
 wandb.login(key=os.getenv("WANDB_API_KEY"))
@@ -52,9 +54,10 @@ def train() -> None:
 
     identity_encoder = IdentityEncoder().to(device)
     message_encoder = MessageEncoder().to(device)
+    watermark_encoder = WatermarkEncoder().to(device)
 
     optimizer = Adam(
-        list(identity_encoder.parameters()) + list(message_encoder.parameters()),
+        list(identity_encoder.parameters()) + list(message_encoder.parameters()) + list(watermark_encoder.parameters()),
         lr=1e-4,
     )
 
@@ -63,7 +66,8 @@ def train() -> None:
 
     identity_encoder.train()
     message_encoder.train()
-
+    watermark_encoder.train()
+    
     for epoch in range(num_epochs):
         running_loss = 0.0
         num_batches = 0
@@ -103,6 +107,9 @@ def train() -> None:
         avg_loss = running_loss / max(1, num_batches)
         print(f"Epoch {epoch + 1}/{num_epochs} - Loss: {avg_loss:.4f}")
         run.log({"loss": avg_loss})
+
+        torch.save(identity_encoder.state_dict(), f"weights/identity_encoder/identity_encoder_{epoch + 1}.pth")
+        torch.save(message_encoder.state_dict(), f"weights/message_encoder/message_encoder_{epoch + 1}.pth")
 
     run.finish()
 
