@@ -12,6 +12,7 @@ dependencies:
     - torchvision
     - dotenv
     - gdown
+    - torchmetrics
   - insightface
   - wandb
   - tqdm
