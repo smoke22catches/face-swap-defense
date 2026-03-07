@@ -15,6 +15,7 @@ from PIL import Image
 from datasets.celeba import get_celeba_dataloader
 from model.identity_encoder import IdentityEncoder
 from model.message_encoder import MessageEncoder
+from model.message_decoder import MessageDecoder
 from model.watermark_encoder import WatermarkEncoder
 from model.utils import get_face_embedding_tensor_batch
 
@@ -64,20 +65,40 @@ def save_training_image(original_image, watermarked_image, epoch, i):
     os.makedirs("training_samples", exist_ok=True)
     combined_image.save(f"training_samples/epoch{epoch}_iter{i}.png")
 
-def train(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder, watermark_encoder: WatermarkEncoder, optimizer: Adam, dataloader: DataLoader, device: torch.device, epoch: int, num_epochs: int, message_dim: int, run: wandb.Run) -> None:
+def save_recovered_message(original_message, recovered_message, epoch, i):
+    os.makedirs("recovered_messages_samples", exist_ok=True)
+    os.makedirs(f"recovered_messages_samples/epoch{epoch}", exist_ok=True)
+    torch.save(recovered_message, f"recovered_messages_samples/epoch{epoch}/recovered_message.pt")
+    torch.save(original_message, f"recovered_messages_samples/epoch{epoch}/original_message.pt")
+
+def train(
+    identity_encoder: IdentityEncoder, 
+    message_encoder: MessageEncoder, 
+    message_decoder: MessageDecoder, 
+    watermark_encoder: WatermarkEncoder, 
+    optimizer: Adam, 
+    dataloader: DataLoader, 
+    device: torch.device, 
+    epoch: int, 
+    num_epochs: int, 
+    message_dim: int, 
+run: wandb.Run) -> None:
     identity_encoder.train()
     message_encoder.train()
     watermark_encoder.train()
-
+    message_decoder.train()
     running_loss = 0.0
     running_cos_sim_loss = 0.0
     running_watermark_lpips_loss = 0.0
     running_watermarked_cos_sim_loss = 0.0
+    running_message_recovery_loss = 0.0
     num_batches = 0
 
     progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}", file=sys.stdout)
 
     image_index = 0
+    message_index = 0
+    
     for images, id_vecs, _ in progress_bar:
         images = images.to(device)
         id_vecs = id_vecs.to(device)
@@ -95,20 +116,28 @@ def train(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder, wa
         cos_sim = F.cosine_similarity(id_vecs, out_vecs, dim=1)
         cos_sim_loss = 1 - cos_sim.mean()
 
+        # Training message decoder by optimizing the MSE between the original message and the decoded message
+        decoded_messages = message_decoder(out_vecs)
+        message_recovery_loss = F.mse_loss(messages, decoded_messages)
+
+        if random() <= 0.01 or message_index <= 10:
+            save_recovered_message(messages[0], decoded_messages[0], epoch, message_index)
+            message_index += 1
+
         # Training watermark encoder by optimizing the LPIPS between original and watermarked images
         watermarked_images = watermark_encoder(images, out_vecs)
         watermarked_images = torch.clamp(watermarked_images, min=0.0, max=1.0)
         lpips = LearnedPerceptualImagePatchSimilarity(net_type="squeeze", normalize=True).to(device)
         watermark_lpips_loss = lpips(images, watermarked_images)
 
-        # and the cosini similarity loss between identity representations of original and watermarked images
+        # and the cosini similarity loss between identity representations of watermarked images and watermarked identity representations
         watermarked_id_vecs = get_face_embedding_tensor_batch(watermarked_images)
         watermarked_id_vecs = watermarked_id_vecs.to(device)
-        watermarked_cos_sim = F.cosine_similarity(id_vecs, watermarked_id_vecs, dim=1)
+        watermarked_cos_sim = F.cosine_similarity(out_vecs, watermarked_id_vecs, dim=1)
         watermarked_cos_sim_loss = 1 - watermarked_cos_sim.mean()
         
         
-        total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss
+        total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss + message_recovery_loss
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
@@ -117,9 +146,10 @@ def train(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder, wa
         running_cos_sim_loss += cos_sim_loss.item()
         running_watermark_lpips_loss += watermark_lpips_loss.item()
         running_watermarked_cos_sim_loss += watermarked_cos_sim_loss.item()
+        running_message_recovery_loss += message_recovery_loss.item()
         num_batches += 1
 
-        progress_bar.set_postfix({"watermark_lpips_loss": f"{watermark_lpips_loss.item():.4f}", "cos_sim_loss": f"{cos_sim_loss.item():.4f}"})
+        progress_bar.set_postfix({"message_recovery_loss": f"{message_recovery_loss.item():.4f}"})
 
         if random() <= 0.01 or image_index <= 10:
             save_training_image(images[0], watermarked_images[0], epoch, image_index)
@@ -129,11 +159,13 @@ def train(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder, wa
     avg_cos_sim_loss = running_cos_sim_loss / max(1, num_batches)
     avg_watermark_lpips_loss = running_watermark_lpips_loss / max(1, num_batches)
     avg_watermarked_cos_sim_loss = running_watermarked_cos_sim_loss / max(1, num_batches)
-    print(f"Epoch {epoch + 1}/{num_epochs} - Cosine similarity loss: {avg_cos_sim_loss:.4f}, Watermark LPIPS loss: {avg_watermark_lpips_loss:.4f}, Watermarked cosine similarity loss: {avg_watermarked_cos_sim_loss:.4f}, Total loss: {avg_loss:.4f}")
+    avg_message_recovery_loss = running_message_recovery_loss / max(1, num_batches)
+    print(f"Epoch {epoch + 1}/{num_epochs} - Cosine similarity loss: {avg_cos_sim_loss:.4f}, Watermark LPIPS loss: {avg_watermark_lpips_loss:.4f}, Watermarked cosine similarity loss: {avg_watermarked_cos_sim_loss:.4f}, Message recovery loss: {avg_message_recovery_loss:.4f}, Total loss: {avg_loss:.4f}")
     run.log({
         "train/cos_sim_loss": avg_cos_sim_loss, 
         "train/watermark_lpips_loss": avg_watermark_lpips_loss, 
         "train/watermarked_cos_sim_loss": avg_watermarked_cos_sim_loss, 
+        "train/message_recovery_loss": avg_message_recovery_loss,
         "train/total_loss": avg_loss
     })
 
@@ -145,15 +177,19 @@ def train(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder, wa
     torch.save(message_encoder.state_dict(), f"weights/message_encoder/message_encoder_{epoch + 1}.pth")
     torch.save(watermark_encoder.state_dict(), f"weights/watermark_encoder/watermark_encoder_{epoch + 1}.pth")
 
-def validate(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder, watermark_encoder: WatermarkEncoder, optimizer: Adam, dataloader: DataLoader, device: torch.device, epoch: int, num_epochs: int, message_dim: int, run: wandb.Run) -> None:
+def validate(
+    identity_encoder: IdentityEncoder, 
+    message_encoder: MessageEncoder, 
+    message_decoder: MessageDecoder, watermark_encoder: WatermarkEncoder, optimizer: Adam, dataloader: DataLoader, device: torch.device, epoch: int, num_epochs: int, message_dim: int, run: wandb.Run) -> None:
     identity_encoder.eval()
     message_encoder.eval()
     watermark_encoder.eval()
-
+    message_decoder.eval()
     running_loss = 0.0
     running_cos_sim_loss = 0.0
     running_watermark_lpips_loss = 0.0
     running_watermarked_cos_sim_loss = 0.0
+    running_message_recovery_loss = 0.0
     num_batches = 0
 
     progress_bar = tqdm(dataloader, desc="Validating", file=sys.stdout)
@@ -173,6 +209,9 @@ def validate(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder,
         cos_sim = F.cosine_similarity(id_vecs, out_vecs, dim=1)
         cos_sim_loss = 1 - cos_sim.mean()
 
+        decoded_messages = message_decoder(out_vecs)
+        message_recovery_loss = F.mse_loss(messages, decoded_messages)
+
         watermarked_images = watermark_encoder(images, out_vecs)
         watermarked_images = torch.clamp(watermarked_images, min=0.0, max=1.0)
         lpips = LearnedPerceptualImagePatchSimilarity(net_type="squeeze", normalize=True).to(device)
@@ -180,15 +219,16 @@ def validate(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder,
 
         watermarked_id_vecs = get_face_embedding_tensor_batch(watermarked_images)
         watermarked_id_vecs = watermarked_id_vecs.to(device)
-        watermarked_cos_sim = F.cosine_similarity(id_vecs, watermarked_id_vecs, dim=1)
+        watermarked_cos_sim = F.cosine_similarity(out_vecs, watermarked_id_vecs, dim=1)
         watermarked_cos_sim_loss = 1 - watermarked_cos_sim.mean()
         
-        total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss
+        total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss + message_recovery_loss
 
         running_loss += total_loss.item()
         running_cos_sim_loss += cos_sim_loss.item()
         running_watermark_lpips_loss += watermark_lpips_loss.item()
         running_watermarked_cos_sim_loss += watermarked_cos_sim_loss.item()
+        running_message_recovery_loss += message_recovery_loss.item()
         num_batches += 1
 
         progress_bar.set_postfix({"watermark_lpips_loss": f"{watermark_lpips_loss.item():.4f}", "cos_sim_loss": f"{cos_sim_loss.item():.4f}"})
@@ -197,11 +237,13 @@ def validate(identity_encoder: IdentityEncoder, message_encoder: MessageEncoder,
     avg_cos_sim_loss = running_cos_sim_loss / max(1, num_batches)
     avg_watermark_lpips_loss = running_watermark_lpips_loss / max(1, num_batches)
     avg_watermarked_cos_sim_loss = running_watermarked_cos_sim_loss / max(1, num_batches)
-    print(f"Validation - Cosine similarity loss: {avg_cos_sim_loss:.4f}, Watermark LPIPS loss: {avg_watermark_lpips_loss:.4f}, Watermarked cosine similarity loss: {avg_watermarked_cos_sim_loss:.4f}, Total loss: {avg_loss:.4f}")
+    avg_message_recovery_loss = running_message_recovery_loss / max(1, num_batches)
+    print(f"Validation - Message recovery loss: {avg_message_recovery_loss:.4f}, Cosine similarity loss: {avg_cos_sim_loss:.4f}, Watermark LPIPS loss: {avg_watermark_lpips_loss:.4f}, Watermarked cosine similarity loss: {avg_watermarked_cos_sim_loss:.4f}, Total loss: {avg_loss:.4f}")
     run.log({
         "val/cos_sim_loss": avg_cos_sim_loss, 
         "val/watermark_lpips_loss": avg_watermark_lpips_loss, 
         "val/watermarked_cos_sim_loss": avg_watermarked_cos_sim_loss, 
+        "val/message_recovery_loss": avg_message_recovery_loss,
         "val/total_loss": avg_loss
     })
     return avg_loss, avg_cos_sim_loss, avg_watermark_lpips_loss, avg_watermarked_cos_sim_loss
@@ -225,10 +267,11 @@ def main() -> None:
 
     identity_encoder = IdentityEncoder().to(device)
     message_encoder = MessageEncoder().to(device)
+    message_decoder = MessageDecoder().to(device)
     watermark_encoder = WatermarkEncoder().to(device)
 
     optimizer = Adam(
-        list(identity_encoder.parameters()) + list(message_encoder.parameters()) + list(watermark_encoder.parameters()),
+        list(identity_encoder.parameters()) + list(message_encoder.parameters()) + list(message_decoder.parameters()) + list(watermark_encoder.parameters()),
         lr=1e-4,
     )
 
@@ -236,8 +279,8 @@ def main() -> None:
     message_dim = 512
 
     for epoch in range(num_epochs):
-        train(identity_encoder, message_encoder, watermark_encoder, optimizer, dataloader, device, epoch, num_epochs, message_dim, run)
-        validate(identity_encoder, message_encoder, watermark_encoder, optimizer, val_dataloader, device, epoch, num_epochs, message_dim, run)
+        train(identity_encoder, message_encoder, message_decoder, watermark_encoder, optimizer, dataloader, device, epoch, num_epochs, message_dim, run)
+        validate(identity_encoder, message_encoder, message_decoder, watermark_encoder, optimizer, val_dataloader, device, epoch, num_epochs, message_dim, run)
 
 if __name__ == "__main__":
     main()
