@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Callable, List, Optional, Tuple
 
 from PIL import Image
@@ -34,6 +35,8 @@ class CelebADataset(Dataset):
         transform: Optional[Callable] = None,
         return_repr: bool = False,
         repr_root: Optional[str] = None,
+        part: float = 1.0,
+        seed: Optional[int] = None,
     ) -> None:
         """
         Parameters
@@ -49,6 +52,11 @@ class CelebADataset(Dataset):
               of the split value.
         transform:
             Transform applied to PIL images before returning them.
+        part:
+            Fraction of the dataset to use, in [0.0, 1.0]. 0.0 yields an empty
+            dataset; 1.0 uses the full dataset. The subset is chosen randomly.
+        seed:
+            Optional random seed for selecting the subset when part < 1.0.
         """
         super().__init__()
         self.root = root
@@ -62,6 +70,11 @@ class CelebADataset(Dataset):
             raise ValueError(
                 f"Invalid split '{split}'. Expected one of "
                 f"{{'train', 'valid', 'test', 'all'}}."
+            )
+
+        if not 0.0 <= part <= 1.0:
+            raise ValueError(
+                f"part must be in [0.0, 1.0], got {part!r}."
             )
 
         # Discover all image files under root.
@@ -125,6 +138,22 @@ class CelebADataset(Dataset):
                 self.image_paths = filtered_paths
                 if filtered_labels is not None:
                     self.identity_labels = filtered_labels
+
+        # Optionally use only a random fraction of the dataset.
+        if part < 1.0 and len(self.image_paths) > 0:
+            if seed is not None:
+                random.seed(seed)
+            n_total = len(self.image_paths)
+            n_keep = max(0, int(n_total * part))
+            if n_keep == 0:
+                self.image_paths = []
+                if self.identity_labels is not None:
+                    self.identity_labels = []
+            else:
+                indices = random.sample(range(n_total), n_keep)
+                self.image_paths = [self.image_paths[i] for i in indices]
+                if self.identity_labels is not None:
+                    self.identity_labels = [self.identity_labels[i] for i in indices]
 
     def _discover_images(self, root: str) -> List[str]:
         image_paths: List[str] = []
@@ -227,10 +256,17 @@ def get_celeba_dataloader(
     num_workers: int = 4,
     shuffle: bool = True,
     return_repr: bool = False,
+    part: float = 1.0,
+    seed: Optional[int] = None,
 ) -> DataLoader:
     """
     Convenience function that builds a DataLoader over the custom CelebA
     dataset with the same image preprocessing as used previously in train.py.
+
+    part:
+        Fraction of the dataset to use (0.0 to 1.0); subset is chosen randomly.
+    seed:
+        Optional random seed for subset selection when part < 1.0.
     """
     transform = transforms.Compose(
         [
@@ -246,6 +282,8 @@ def get_celeba_dataloader(
         transform=transform,
         return_repr=return_repr,
         repr_root=os.path.join(root, "repr_align_celeba"),
+        part=part,
+        seed=seed,
     )
 
     dataloader = DataLoader(
