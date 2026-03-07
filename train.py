@@ -11,6 +11,7 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from random import random
 import numpy as np
 from PIL import Image
+import argparse
 
 from datasets.celeba import get_celeba_dataloader
 from model.identity_encoder import IdentityEncoder
@@ -18,13 +19,19 @@ from model.message_encoder import MessageEncoder
 from model.message_decoder import MessageDecoder
 from model.watermark_encoder import WatermarkEncoder
 from model.utils import get_face_embedding_tensor_batch
-
+from config import Configuration
 
 load_dotenv()
 wandb.login(key=os.getenv("WANDB_API_KEY"))
 
+def parse_config() -> Configuration:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_name", type=str, required=True)
+    parser.add_argument("--part", type=float, required=True)
+    parsed_args = parser.parse_args()
+    return Configuration(**vars(parsed_args))
 
-def get_train_dataloader() -> DataLoader:
+def get_train_dataloader(config: Configuration) -> DataLoader:
     return get_celeba_dataloader(
         root="./data/celeba",
         split="train",
@@ -33,10 +40,10 @@ def get_train_dataloader() -> DataLoader:
         num_workers=4,
         shuffle=True,
         return_repr=True,
-        part=0.03,
+        part=config.part,
     )
 
-def get_val_dataloader() -> DataLoader:
+def get_val_dataloader(config: Configuration) -> DataLoader:
     return get_celeba_dataloader(
         root="./data/celeba",
         split="valid",
@@ -45,7 +52,7 @@ def get_val_dataloader() -> DataLoader:
         num_workers=4,
         shuffle=False,
         return_repr=True,
-        part=0.03,
+        part=config.part,
     )
 
 def save_training_image(original_image, watermarked_image, epoch, i):
@@ -136,6 +143,8 @@ run: wandb.Run) -> None:
         watermarked_cos_sim = F.cosine_similarity(out_vecs, watermarked_id_vecs, dim=1)
         watermarked_cos_sim_loss = 1 - watermarked_cos_sim.mean()
         
+        # todo add additional message recovery optimization from watermarked identities
+        # todo 
         
         total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss + message_recovery_loss
         optimizer.zero_grad()
@@ -250,20 +259,22 @@ def validate(
 
 def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    config = parse_config()
     run = wandb.init(
         entity="smoke22catches-vinnytsia-national-technical-university",
         project="face-swap-defense",
-        name="identity-message-encoder-dev-1",
+        name=config.run_name,
         config={
             "learning_rate": 1e-4,
             "batch_size": 32,
             "num_epochs": 20,
             "message_dim": 512,
+            **vars(config),
         },
     )
 
-    dataloader = get_train_dataloader()
-    val_dataloader = get_val_dataloader()
+    dataloader = get_train_dataloader(config)
+    val_dataloader = get_val_dataloader(config)
 
     identity_encoder = IdentityEncoder().to(device)
     message_encoder = MessageEncoder().to(device)
