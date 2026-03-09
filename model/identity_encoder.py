@@ -1,17 +1,19 @@
 import torch
 from torch import nn, Tensor
+from config import Configuration
 
 
 class IdentityEncoder(nn.Module):
     """Embeds watermark into identity representation"""
 
-    def __init__(self):
+    def __init__(self, config: Configuration):
         super().__init__()
         # Simple MLP that takes concatenated identity and message vectors
         # of size 512 each (total 1024) and outputs a 512-dimensional
         # modified identity representation.
+        self.message_dim = config.message_dim
         self.layers = nn.Sequential(
-            nn.Linear(1024, 1024),
+            nn.Linear(self.message_dim + 512, 1024),
             nn.ReLU(inplace=True),
             nn.Linear(1024, 512),
         )

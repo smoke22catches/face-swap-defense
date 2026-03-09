@@ -27,7 +27,10 @@ wandb.login(key=os.getenv("WANDB_API_KEY"))
 def parse_config() -> Configuration:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run_name", type=str, required=True)
-    parser.add_argument("--part", type=float, required=True)
+    parser.add_argument("--part", type=float, default=0.1)
+    parser.add_argument("--message_dim", type=int, default=128)
+    parser.add_argument("--md_opt_decode", action="store_true")
+    parser.add_argument("--md_opt_watermark", action="store_true")
     parsed_args = parser.parse_args()
     return Configuration(**vars(parsed_args))
 
@@ -72,12 +75,6 @@ def save_training_image(original_image, watermarked_image, epoch, i):
     os.makedirs("training_samples", exist_ok=True)
     combined_image.save(f"training_samples/epoch{epoch}_iter{i}.png")
 
-def save_recovered_message(original_message, recovered_message, epoch, i):
-    os.makedirs("recovered_messages_samples", exist_ok=True)
-    os.makedirs(f"recovered_messages_samples/epoch{epoch}", exist_ok=True)
-    torch.save(recovered_message, f"recovered_messages_samples/epoch{epoch}/recovered_message.pt")
-    torch.save(original_message, f"recovered_messages_samples/epoch{epoch}/original_message.pt")
-
 def train(
     identity_encoder: IdentityEncoder, 
     message_encoder: MessageEncoder, 
@@ -89,7 +86,9 @@ def train(
     epoch: int, 
     num_epochs: int, 
     message_dim: int, 
-run: wandb.Run) -> None:
+    run: wandb.Run,
+    config: Configuration
+) -> None:
     identity_encoder.train()
     message_encoder.train()
     watermark_encoder.train()
@@ -116,20 +115,19 @@ run: wandb.Run) -> None:
             0, 2, (batch_size, message_dim), device=device, dtype=torch.float32
         )
 
-        msg_vecs = message_encoder(messages)  # (B, 512)
+        msg_vecs = message_encoder(messages)
         # Pass through IdentityEncoder to embed the message into identity representation
-        out_vecs = identity_encoder(id_vecs, msg_vecs)  # (B, 512)
+        out_vecs = identity_encoder(id_vecs, msg_vecs)
         # Cosine similarity loss between original and modified identity representations
         cos_sim = F.cosine_similarity(id_vecs, out_vecs, dim=1)
         cos_sim_loss = 1 - cos_sim.mean()
 
         # Training message decoder by optimizing the MSE between the original message and the decoded message
-        decoded_messages = message_decoder(out_vecs)
-        message_recovery_loss = F.mse_loss(messages, decoded_messages)
+        message_recovery_loss = 0.0
 
-        if random() <= 0.01 or message_index <= 10:
-            save_recovered_message(messages[0], decoded_messages[0], epoch, message_index)
-            message_index += 1
+        if config.md_opt_decode:
+            decoded_messages = message_decoder(out_vecs)
+            message_recovery_loss += F.mse_loss(messages, decoded_messages)
 
         # Training watermark encoder by optimizing the LPIPS between original and watermarked images
         watermarked_images = watermark_encoder(images, out_vecs)
@@ -143,8 +141,10 @@ run: wandb.Run) -> None:
         watermarked_cos_sim = F.cosine_similarity(out_vecs, watermarked_id_vecs, dim=1)
         watermarked_cos_sim_loss = 1 - watermarked_cos_sim.mean()
         
-        # todo add additional message recovery optimization from watermarked identities
-        # todo 
+        # add additional message recovery optimization from watermarked identities
+        if config.md_opt_watermark:
+            decoded_messages = message_decoder(watermarked_id_vecs)
+            message_recovery_loss += F.mse_loss(messages, decoded_messages)
         
         total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss + message_recovery_loss
         optimizer.zero_grad()
@@ -189,7 +189,17 @@ run: wandb.Run) -> None:
 def validate(
     identity_encoder: IdentityEncoder, 
     message_encoder: MessageEncoder, 
-    message_decoder: MessageDecoder, watermark_encoder: WatermarkEncoder, optimizer: Adam, dataloader: DataLoader, device: torch.device, epoch: int, num_epochs: int, message_dim: int, run: wandb.Run) -> None:
+    message_decoder: MessageDecoder, 
+    watermark_encoder: WatermarkEncoder, 
+    optimizer: Adam, 
+    dataloader: DataLoader, 
+    device: torch.device, 
+    epoch: int, 
+    num_epochs: int, 
+    message_dim: int, 
+    run: wandb.Run,
+    config: Configuration
+) -> None:
     identity_encoder.eval()
     message_encoder.eval()
     watermark_encoder.eval()
@@ -218,8 +228,10 @@ def validate(
         cos_sim = F.cosine_similarity(id_vecs, out_vecs, dim=1)
         cos_sim_loss = 1 - cos_sim.mean()
 
-        decoded_messages = message_decoder(out_vecs)
-        message_recovery_loss = F.mse_loss(messages, decoded_messages)
+        message_recovery_loss = 0.0
+        if config.md_opt_decode:
+            decoded_messages = message_decoder(out_vecs)
+            message_recovery_loss += F.mse_loss(messages, decoded_messages)
 
         watermarked_images = watermark_encoder(images, out_vecs)
         watermarked_images = torch.clamp(watermarked_images, min=0.0, max=1.0)
@@ -230,6 +242,10 @@ def validate(
         watermarked_id_vecs = watermarked_id_vecs.to(device)
         watermarked_cos_sim = F.cosine_similarity(out_vecs, watermarked_id_vecs, dim=1)
         watermarked_cos_sim_loss = 1 - watermarked_cos_sim.mean()
+
+        if config.md_opt_watermark:
+            decoded_messages = message_decoder(watermarked_id_vecs)
+            message_recovery_loss += F.mse_loss(messages, decoded_messages)
         
         total_loss = cos_sim_loss + watermark_lpips_loss + watermarked_cos_sim_loss + message_recovery_loss
 
@@ -268,7 +284,6 @@ def main() -> None:
             "learning_rate": 1e-4,
             "batch_size": 32,
             "num_epochs": 20,
-            "message_dim": 512,
             **vars(config),
         },
     )
@@ -276,9 +291,9 @@ def main() -> None:
     dataloader = get_train_dataloader(config)
     val_dataloader = get_val_dataloader(config)
 
-    identity_encoder = IdentityEncoder().to(device)
-    message_encoder = MessageEncoder().to(device)
-    message_decoder = MessageDecoder().to(device)
+    identity_encoder = IdentityEncoder(config).to(device)
+    message_encoder = MessageEncoder(config).to(device)
+    message_decoder = MessageDecoder(config).to(device)
     watermark_encoder = WatermarkEncoder().to(device)
 
     optimizer = Adam(
@@ -287,11 +302,11 @@ def main() -> None:
     )
 
     num_epochs = 20
-    message_dim = 512
+    message_dim = config.message_dim
 
     for epoch in range(num_epochs):
-        train(identity_encoder, message_encoder, message_decoder, watermark_encoder, optimizer, dataloader, device, epoch, num_epochs, message_dim, run)
-        validate(identity_encoder, message_encoder, message_decoder, watermark_encoder, optimizer, val_dataloader, device, epoch, num_epochs, message_dim, run)
+        train(identity_encoder, message_encoder, message_decoder, watermark_encoder, optimizer, dataloader, device, epoch, num_epochs, message_dim, run, config)
+        validate(identity_encoder, message_encoder, message_decoder, watermark_encoder, optimizer, val_dataloader, device, epoch, num_epochs, message_dim, run, config)
 
 if __name__ == "__main__":
     main()
