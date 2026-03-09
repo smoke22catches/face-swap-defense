@@ -31,6 +31,7 @@ def parse_config() -> Configuration:
     parser.add_argument("--message_dim", type=int, default=128)
     parser.add_argument("--md_opt_decode", action="store_true")
     parser.add_argument("--md_opt_watermark", action="store_true")
+    parser.add_argument("--epochs", type=int, default=20)
     parsed_args = parser.parse_args()
     return Configuration(**vars(parsed_args))
 
@@ -179,12 +180,15 @@ def train(
     })
 
     os.makedirs("weights", exist_ok=True)
-    os.makedirs("weights/identity_encoder", exist_ok=True)
-    os.makedirs("weights/message_encoder", exist_ok=True)
-    os.makedirs("weights/watermark_encoder", exist_ok=True)
-    torch.save(identity_encoder.state_dict(), f"weights/identity_encoder/identity_encoder_{epoch + 1}.pth")
-    torch.save(message_encoder.state_dict(), f"weights/message_encoder/message_encoder_{epoch + 1}.pth")
-    torch.save(watermark_encoder.state_dict(), f"weights/watermark_encoder/watermark_encoder_{epoch + 1}.pth")
+    os.makedirs(f"weights/{config.run_name}", exist_ok=True)
+    os.makedirs(f"weights/{config.run_name}/identity_encoder", exist_ok=True)
+    os.makedirs(f"weights/{config.run_name}/message_encoder", exist_ok=True)
+    os.makedirs(f"weights/{config.run_name}/watermark_encoder", exist_ok=True)
+    os.makedirs(f"weights/{config.run_name}/message_decoder", exist_ok=True)
+    torch.save(identity_encoder.state_dict(), f"weights/{config.run_name}/identity_encoder/identity_encoder_{epoch + 1}.pth")
+    torch.save(message_encoder.state_dict(), f"weights/{config.run_name}/message_encoder/message_encoder_{epoch + 1}.pth")
+    torch.save(watermark_encoder.state_dict(), f"weights/{config.run_name}/watermark_encoder/watermark_encoder_{epoch + 1}.pth")
+    torch.save(message_decoder.state_dict(), f"weights/{config.run_name}/message_decoder/message_decoder_{epoch + 1}.pth")
 
 def validate(
     identity_encoder: IdentityEncoder, 
@@ -283,7 +287,6 @@ def main() -> None:
         config={
             "learning_rate": 1e-4,
             "batch_size": 32,
-            "num_epochs": 20,
             **vars(config),
         },
     )
@@ -301,7 +304,7 @@ def main() -> None:
         lr=1e-4,
     )
 
-    num_epochs = 20
+    num_epochs = config.epochs
     message_dim = config.message_dim
 
     for epoch in range(num_epochs):
