@@ -18,6 +18,35 @@ python -m ipykernel install --user --name face-swap-defense --display-name "Face
 
 ## Backbones and baseline models
 
+### FaceFusion
+1. Create a dedicated conda environment
+```bash
+conda create --name facefusion python=3.12 pip=25.0
+conda activate facefusion
+```
+2. Install the accelerator:
+```bash
+conda install nvidia/label/cuda-12.9.1::cuda-runtime nvidia/label/cudnn-9.10.0::cudnn
+```
+3. Clone the repository:
+```bash
+git clone https://github.com/facefusion/facefusion
+cd facefusion
+```
+4. Install the dependencies:
+```bash
+pip install -r requirements.txt
+```
+5. Install the facefusion:
+```bash
+python install.py --onnxruntime cuda
+```
+6. Reload the environment:
+```bash
+conda deactivate
+conda activate facefusion
+```
+
 ### SimSwap
 1. Create a dedicated conda environment
 ```bash
