@@ -33,15 +33,11 @@ conda install nvidia/label/cuda-12.9.1::cuda-runtime nvidia/label/cudnn-9.10.0::
 git clone https://github.com/facefusion/facefusion
 cd facefusion
 ```
-4. Install the dependencies:
-```bash
-pip install -r requirements.txt
-```
-5. Install the facefusion:
+4. Install the facefusion:
 ```bash
 python install.py --onnxruntime cuda
 ```
-6. Reload the environment:
+5. Reload the environment:
 ```bash
 conda deactivate
 conda activate facefusion

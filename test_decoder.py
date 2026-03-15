@@ -78,10 +78,11 @@ def main() -> None:
     num_correct = (original_np == retrieved_binary).sum()
     total = original_np.size
     pct_correct = 100.0 * num_correct / total
-
+    mse = np.mean((original_np - retrieved_binary) ** 2)
     print("Original message:", original_np.tolist())
     print("Retrieved message:", retrieved_binary.tolist())
     print(f"Recovered correct: {num_correct}/{total} ({pct_correct:.2f}%)")
+    print(f"MSE: {mse:.4f}")
 
 
 if __name__ == "__main__":
