@@ -280,7 +280,7 @@ def get_celeba_dataloader(
         root=root,
         split=split,
         transform=transform,
-        return_repr=return_repr,
+        return_repr=False,
         repr_root=os.path.join(root, "repr_align_celeba"),
         part=part,
         seed=seed,

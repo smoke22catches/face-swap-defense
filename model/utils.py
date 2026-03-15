@@ -1,24 +1,25 @@
 import torch
-from insightface.app import FaceAnalysis
-import numpy as np
+import torch.nn.functional as F
+from .insightface.recognition.arcface_torch.backbones import get_model
 
-model = FaceAnalysis(name="buffalo_sc", providers=["CUDAExecutionProvider"])
-model.prepare(ctx_id=0, det_thresh=0.5, det_size=(320, 320))
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+arcface_model = get_model("r18", fp16=True)
+arcface_model.load_state_dict(torch.load("weights/ms1mv3_arcface_r18_fp16/backbone.pth")) 
+arcface_model.eval()
+arcface_model.to(device)
 
+for param in arcface_model.parameters():
+    param.requires_grad = False
 
-def get_face_embedding(x: np.ndarray) -> torch.Tensor:
-    faces = model.get(x)
-    if len(faces) != 0:
-        return torch.tensor(faces[0].embedding)
-    else:
-        return torch.zeros(512)
-
-def get_face_embedding_tensor_batch(x: torch.Tensor) -> torch.Tensor:
-    x = x.permute(0, 2, 3, 1)
-    x = x.cpu().detach().numpy()
-    embeddings = []
-    for img in x:
-        embedding = get_face_embedding(img * 255)
-        embeddings.append(embedding)
-    embeddings = torch.stack(embeddings, dim=0)
+def get_face_embedding(x: torch.Tensor) -> torch.Tensor:
+    x = F.interpolate(x, size=(112, 112), mode='bilinear', align_corners=False)
+    x = (x - 0.5) / 0.5
+    embeddings = arcface_model(x)
     return embeddings
+
+# def get_face_embedding_tensor_batch(x: torch.Tensor) -> torch.Tensor:
+#     x = F.interpolate(x, size=(112, 112), mode='bilinear', align_corners=False)
+#     x = (x - 0.5) / 0.5
+#     embeddings = arcface_model(x)
+    
+#     return embeddings

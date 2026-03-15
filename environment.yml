@@ -13,7 +13,6 @@ dependencies:
     - dotenv
     - gdown
     - torchmetrics
-  - insightface
   - wandb
   - tqdm
   - ipykernel

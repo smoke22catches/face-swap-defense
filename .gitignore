@@ -11,3 +11,4 @@ training_samples/
 recovered_messages_samples/
 **/*.npy
 .jobs
+insightface

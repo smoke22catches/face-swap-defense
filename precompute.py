@@ -31,7 +31,9 @@ def main() -> None:
         img_path = os.path.join(image_root, filename)
         image = cv2.imread(img_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        embedding = get_face_embedding(image)
+        image = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
+        image = image.unsqueeze(0).to(device)
+        embedding = get_face_embedding(image).squeeze(0)
         torch.save(embedding, out_path)
 
 
