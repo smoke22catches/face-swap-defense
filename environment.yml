@@ -3,7 +3,7 @@ channels:
   - pytorch
   - conda-forge
 dependencies:
-  - python=>3.10
+  - python>=3.10
   - numpy
   - pip
   - pip:
@@ -13,6 +13,9 @@ dependencies:
     - dotenv
     - gdown
     - torchmetrics
+    # Differentiable JPEG (mlomnitz); packaged in-repo — run `conda env create` from this repo root
+    - -e ./vendor/DiffJPEG
   - wandb
   - tqdm
   - ipykernel
+  - opencv

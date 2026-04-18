@@ -8,7 +8,12 @@ wandb/
 weights/
 **/*.pt
 training_samples/
+val_watermark_samples/
 recovered_messages_samples/
 **/*.npy
 .jobs
 insightface
+
+# Vendored pip editable install (vendor/DiffJPEG): build metadata, not source
+vendor/**/build/
+vendor/**/*.egg-info/

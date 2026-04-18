@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Vendored from https://github.com/mlomnitz/DiffJPEG (no upstream packaging).
+# Install with: pip install -e ./vendor/DiffJPEG
+
+[project]
+name = "diffjpeg-mlomnitz"
+version = "1.0.0"
+description = "Differentiable JPEG in PyTorch (mlomnitz/DiffJPEG)"
+readme = "README.md"
+requires-python = ">=3.10"
+# NumPy is declared; PyTorch must be present in the environment (conda/pip installs it above).
+dependencies = [
+    "numpy",
+]
+
+[tool.setuptools]
+py-modules = ["DiffJPEG", "utils"]
+packages = ["modules"]
